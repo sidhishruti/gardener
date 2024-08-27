@@ -3077,6 +3077,72 @@ var _ = Describe("Shoot Validation Tests", func() {
 			})
 		})
 
+		Context("Authentication validation", func() {
+			It("should forbid for version < v1.30", func() {
+				shoot.Spec.Kubernetes.Version = "v1.29.0"
+				shoot.Spec.Kubernetes.KubeAPIServer.OIDCConfig = nil
+				shoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication = &core.StructuredAuthentication{
+					ConfigMapName: "foo",
+				}
+				errorList := ValidateShoot(shoot)
+
+				Expect(errorList).ToNot(BeEmpty())
+				Expect(errorList).To(ConsistOf(PointTo(MatchFields(IgnoreExtras, Fields{
+					"Type":   Equal(field.ErrorTypeForbidden),
+					"Field":  Equal("spec.kubernetes.kubeAPIServer.structuredAuthentication"),
+					"Detail": Equal("is available for Kubernetes versions >= v1.30"),
+				}))))
+			})
+
+			It("should forbid empty name", func() {
+				shoot.Spec.Kubernetes.Version = "v1.30.0"
+				shoot.Spec.Kubernetes.KubeAPIServer.OIDCConfig = nil
+				shoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication = &core.StructuredAuthentication{}
+				errorList := ValidateShoot(shoot)
+
+				Expect(errorList).ToNot(BeEmpty())
+				Expect(errorList).To(ConsistOf(PointTo(MatchFields(IgnoreExtras, Fields{
+					"Type":   Equal(field.ErrorTypeForbidden),
+					"Field":  Equal("spec.kubernetes.kubeAPIServer.structuredAuthentication.configMapName"),
+					"Detail": Equal("must provide a name"),
+				}))))
+			})
+
+			It("should forbid setting structured authentication when feature gate is disabled", func() {
+				shoot.Spec.Kubernetes.Version = "v1.30.0"
+				shoot.Spec.Kubernetes.KubeAPIServer.OIDCConfig = nil
+				shoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication = &core.StructuredAuthentication{
+					ConfigMapName: "foo",
+				}
+				shoot.Spec.Kubernetes.KubeAPIServer.FeatureGates = map[string]bool{
+					"StructuredAuthenticationConfiguration": false,
+				}
+				errorList := ValidateShoot(shoot)
+
+				Expect(errorList).ToNot(BeEmpty())
+				Expect(errorList).To(ConsistOf(PointTo(MatchFields(IgnoreExtras, Fields{
+					"Type":   Equal(field.ErrorTypeForbidden),
+					"Field":  Equal("spec.kubernetes.kubeAPIServer.structuredAuthentication"),
+					"Detail": Equal("requires feature gate StructuredAuthenticationConfiguration to be enabled"),
+				}))))
+			})
+
+			It("should forbid setting both oidcConfig and structured authentication", func() {
+				shoot.Spec.Kubernetes.Version = "v1.30.0"
+				shoot.Spec.Kubernetes.KubeAPIServer.StructuredAuthentication = &core.StructuredAuthentication{
+					ConfigMapName: "foo",
+				}
+				errorList := ValidateShoot(shoot)
+
+				Expect(errorList).ToNot(BeEmpty())
+				Expect(errorList).To(ConsistOf(PointTo(MatchFields(IgnoreExtras, Fields{
+					"Type":   Equal(field.ErrorTypeForbidden),
+					"Field":  Equal("spec.kubernetes.kubeAPIServer.oidcConfig"),
+					"Detail": Equal("is incompatible with structuredAuthentication"),
+				}))))
+			})
+		})
+
 		Context("FeatureGates validation", func() {
 			It("should forbid invalid feature gates", func() {
 				featureGates := map[string]bool{

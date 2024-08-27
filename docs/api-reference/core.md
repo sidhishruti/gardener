@@ -5918,6 +5918,21 @@ EncryptionConfig
 <p>EncryptionConfig contains customizable encryption configuration of the Kube API server.</p>
 </td>
 </tr>
+<tr>
+<td>
+<code>structuredAuthentication</code></br>
+<em>
+<a href="#core.gardener.cloud/v1beta1.StructuredAuthentication">
+StructuredAuthentication
+</a>
+</em>
+</td>
+<td>
+<em>(Optional)</em>
+<p>StructuredAuthentication contains configuration settings for structured authentication to the kube-apiserver.
+This field is only available for Kubernetes v1.30 or later.</p>
+</td>
+</tr>
 </tbody>
 </table>
 <h3 id="core.gardener.cloud/v1beta1.KubeControllerManagerConfig">KubeControllerManagerConfig
@@ -12688,6 +12703,37 @@ This field is immutable.</p>
 </td>
 </tr>
 </table>
+</td>
+</tr>
+</tbody>
+</table>
+<h3 id="core.gardener.cloud/v1beta1.StructuredAuthentication">StructuredAuthentication
+</h3>
+<p>
+(<em>Appears on:</em>
+<a href="#core.gardener.cloud/v1beta1.KubeAPIServerConfig">KubeAPIServerConfig</a>)
+</p>
+<p>
+<p>StructuredAuthentication contains authentication config for kube-apiserver.</p>
+</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>configMapName</code></br>
+<em>
+string
+</em>
+</td>
+<td>
+<p>ConfigMapName is the name of the ConfigMap in the project namespace
+which contains AuthenticationConfiguration for the kube-apiserver.</p>
 </td>
 </tr>
 </tbody>

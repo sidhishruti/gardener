@@ -588,6 +588,8 @@ type KubeAPIServerConfig struct {
 	APIAudiences []string
 	// AuditConfig contains configuration settings for the audit of the kube-apiserver.
 	AuditConfig *AuditConfig
+	// StructuredAuthentication contains configuration settings for structured authentication to the kube-apiserver.
+	StructuredAuthentication *StructuredAuthentication
 	// OIDCConfig contains configuration settings for the OIDC provider.
 	OIDCConfig *OIDCConfig
 	// RuntimeConfig contains information about enabled or disabled APIs.
@@ -686,6 +688,13 @@ type AuditPolicy struct {
 	// ConfigMapRef is a reference to a ConfigMap object in the same namespace,
 	// which contains the audit policy for the kube-apiserver.
 	ConfigMapRef *corev1.ObjectReference
+}
+
+// StructuredAuthentication contains authentication config for kube-apiserver.
+type StructuredAuthentication struct {
+	// ConfigMapName is the name of the ConfigMap in the project namespace
+	// which contains AuthenticationConfiguration for the kube-apiserver.
+	ConfigMapName string
 }
 
 // OIDCConfig contains configuration settings for the OIDC provider.

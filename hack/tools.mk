@@ -51,7 +51,7 @@ VGOPATH                    := $(TOOLS_BIN_DIR)/vgopath
 
 # default tool versions
 # renovate: datasource=github-releases depName=golangci/golangci-lint
-GOLANGCI_LINT_VERSION ?= v1.60.2
+GOLANGCI_LINT_VERSION ?= v1.60.3
 # renovate: datasource=github-releases depName=securego/gosec
 GOSEC_VERSION ?= v2.20.0
 # renovate: datasource=github-releases depName=joelanford/go-apidiff
@@ -74,7 +74,7 @@ PROMTOOL_VERSION ?= 2.54.0
 # renovate: datasource=github-releases depName=protocolbuffers/protobuf
 PROTOC_VERSION ?= v27.3
 # renovate: datasource=github-releases depName=GoogleContainerTools/skaffold
-SKAFFOLD_VERSION ?= v2.13.1
+SKAFFOLD_VERSION ?= v2.13.2
 # renovate: datasource=github-releases depName=mikefarah/yq
 YQ_VERSION ?= v4.44.3
 # renovate: datasource=github-releases depName=ironcore-dev/vgopath

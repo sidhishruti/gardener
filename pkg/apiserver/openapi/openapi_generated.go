@@ -205,6 +205,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.ShootStateSpec":                             schema_pkg_apis_core_v1beta1_ShootStateSpec(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.ShootStatus":                                schema_pkg_apis_core_v1beta1_ShootStatus(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.ShootTemplate":                              schema_pkg_apis_core_v1beta1_ShootTemplate(ref),
+		"github.com/gardener/gardener/pkg/apis/core/v1beta1.StructuredAuthentication":                   schema_pkg_apis_core_v1beta1_StructuredAuthentication(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.SystemComponents":                           schema_pkg_apis_core_v1beta1_SystemComponents(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.Toleration":                                 schema_pkg_apis_core_v1beta1_Toleration(ref),
 		"github.com/gardener/gardener/pkg/apis/core/v1beta1.VerticalPodAutoscaler":                      schema_pkg_apis_core_v1beta1_VerticalPodAutoscaler(ref),
@@ -4213,11 +4214,17 @@ func schema_pkg_apis_core_v1beta1_KubeAPIServerConfig(ref common.ReferenceCallba
 							Ref:         ref("github.com/gardener/gardener/pkg/apis/core/v1beta1.EncryptionConfig"),
 						},
 					},
+					"structuredAuthentication": {
+						SchemaProps: spec.SchemaProps{
+							Description: "StructuredAuthentication contains configuration settings for structured authentication to the kube-apiserver. This field is only available for Kubernetes v1.30 or later.",
+							Ref:         ref("github.com/gardener/gardener/pkg/apis/core/v1beta1.StructuredAuthentication"),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/gardener/gardener/pkg/apis/core/v1beta1.APIServerLogging", "github.com/gardener/gardener/pkg/apis/core/v1beta1.APIServerRequests", "github.com/gardener/gardener/pkg/apis/core/v1beta1.AdmissionPlugin", "github.com/gardener/gardener/pkg/apis/core/v1beta1.AuditConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.EncryptionConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.OIDCConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.ServiceAccountConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.WatchCacheSizes", "k8s.io/apimachinery/pkg/apis/meta/v1.Duration"},
+			"github.com/gardener/gardener/pkg/apis/core/v1beta1.APIServerLogging", "github.com/gardener/gardener/pkg/apis/core/v1beta1.APIServerRequests", "github.com/gardener/gardener/pkg/apis/core/v1beta1.AdmissionPlugin", "github.com/gardener/gardener/pkg/apis/core/v1beta1.AuditConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.EncryptionConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.OIDCConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.ServiceAccountConfig", "github.com/gardener/gardener/pkg/apis/core/v1beta1.StructuredAuthentication", "github.com/gardener/gardener/pkg/apis/core/v1beta1.WatchCacheSizes", "k8s.io/apimachinery/pkg/apis/meta/v1.Duration"},
 	}
 }
 
@@ -9167,6 +9174,28 @@ func schema_pkg_apis_core_v1beta1_ShootTemplate(ref common.ReferenceCallback) co
 		},
 		Dependencies: []string{
 			"github.com/gardener/gardener/pkg/apis/core/v1beta1.ShootSpec", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
+	}
+}
+
+func schema_pkg_apis_core_v1beta1_StructuredAuthentication(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "StructuredAuthentication contains authentication config for kube-apiserver.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"configMapName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConfigMapName is the name of the ConfigMap in the project namespace which contains AuthenticationConfiguration for the kube-apiserver.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"configMapName"},
+			},
+		},
 	}
 }
 

@@ -483,6 +483,24 @@ var _ = Describe("helper", func() {
 		}, &corev1.ObjectReference{Name: "foo"})
 	})
 
+	DescribeTable("#GetShootAuthenticationConfigurationConfigMapName",
+		func(kubeAPIServerConfig *core.KubeAPIServerConfig, expectedName string) {
+			authConfigName := GetShootAuthenticationConfigurationConfigMapName(kubeAPIServerConfig)
+			Expect(authConfigName).To(Equal(expectedName))
+		},
+
+		Entry("KubeAPIServerConfig = nil", nil, ""),
+		Entry("StructuredAuthentication = nil", &core.KubeAPIServerConfig{}, ""),
+		Entry("ConfigMapName not set", &core.KubeAPIServerConfig{
+			StructuredAuthentication: &core.StructuredAuthentication{},
+		}, ""),
+		Entry("ConfigMapName set", &core.KubeAPIServerConfig{
+			StructuredAuthentication: &core.StructuredAuthentication{
+				ConfigMapName: "foo",
+			},
+		}, "foo"),
+	)
+
 	DescribeTable("#HibernationIsEnabled",
 		func(shoot *core.Shoot, hibernated bool) {
 			Expect(HibernationIsEnabled(shoot)).To(Equal(hibernated))
