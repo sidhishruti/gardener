@@ -8,7 +8,7 @@ set -e
 
 operation="${1:-check}"
 
-echo "> ${operation^} Skaffold Dependencies"
+echo "> ${operation} Skaffold Dependencies"
 
 success=true
 repo_root="$(git rev-parse --show-toplevel)"
@@ -39,6 +39,7 @@ run "skaffold-operator.yaml" "gardener-resource-manager"                 "garden
 run "skaffold-operator.yaml" "gardener-scheduler"                        "gardener-operator"
 run "skaffold-operator.yaml" "gardener-extension-provider-local"         "provider-local"
 run "skaffold-operator.yaml" "machine-controller-manager-provider-local" "provider-local"
+run "skaffold-operator.yaml" "gardener-extension-admission-local"        "provider-local"
 
 if ! $success ; then
   exit 1

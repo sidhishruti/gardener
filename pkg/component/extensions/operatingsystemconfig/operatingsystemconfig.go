@@ -131,6 +131,8 @@ type OriginalValues struct {
 	// KubeletConfig is the default kubelet configuration for all worker pools. Individual worker pools might overwrite
 	// this configuration.
 	KubeletConfig *gardencorev1beta1.KubeletConfig
+	// KubeProxyEnabled indicates whether kube-proxy is enabled or not.
+	KubeProxyEnabled bool
 	// MachineTypes is a list of machine types.
 	MachineTypes []gardencorev1beta1.MachineType
 	// SSHPublicKeys is a list of public SSH keys.
@@ -206,10 +208,7 @@ type OperatingSystemConfigs struct {
 type Data struct {
 	// Object is the plain OperatingSystemConfig object.
 	Object *extensionsv1alpha1.OperatingSystemConfig
-	// Content is the actual cloud-config user data.
-	// TODO(rfranzke): Remove this Content field after v1.140 is released.
-	Content string
-	// IncludeSecretNameInWorkerPool states whether an extensionsv1alpha1.WorkerPool must include the GardenerNodeAgentSecretName
+	// IncludeSecretNameInWorkerPool states whether a extensionsv1alpha1.WorkerPool must include the GardenerNodeAgentSecretName
 	IncludeSecretNameInWorkerPool bool
 	// GardenerNodeAgentSecretName is the name of the secret storing the gardener node agent configuration in the shoot cluster.
 	GardenerNodeAgentSecretName string
@@ -433,7 +432,6 @@ func (o *operatingSystemConfig) Wait(ctx context.Context) error {
 
 				data := Data{
 					Object:                        osc,
-					Content:                       string(secret.Data[extensionsv1alpha1.OperatingSystemConfigSecretDataKey]),
 					IncludeSecretNameInWorkerPool: hashVersion > 1,
 					GardenerNodeAgentSecretName:   oscKey,
 					SecretName:                    &secret.Name,
@@ -735,6 +733,7 @@ func (o *operatingSystemConfig) newDeployer(version int, osc *extensionsv1alpha1
 		kubeletConfigParameters: kubeletConfigParameters,
 		kubeletCLIFlags:         kubeletCLIFlags,
 		kubeletDataVolumeName:   worker.KubeletDataVolumeName,
+		kubeProxyEnabled:        o.values.KubeProxyEnabled,
 		kubernetesVersion:       kubernetesVersion,
 		sshPublicKeys:           o.values.SSHPublicKeys,
 		sshAccessEnabled:        o.values.SSHAccessEnabled,
@@ -800,6 +799,7 @@ type deployer struct {
 	kubeletConfigParameters components.ConfigurableKubeletConfigParameters
 	kubeletCLIFlags         components.ConfigurableKubeletCLIFlags
 	kubeletDataVolumeName   *string
+	kubeProxyEnabled        bool
 	kubernetesVersion       *semver.Version
 	sshPublicKeys           []string
 	sshAccessEnabled        bool
@@ -839,6 +839,7 @@ func (d *deployer) deploy(ctx context.Context, operation string) (extensionsv1al
 		KubeletConfigParameters: d.kubeletConfigParameters,
 		KubeletCLIFlags:         d.kubeletCLIFlags,
 		KubeletDataVolumeName:   d.kubeletDataVolumeName,
+		KubeProxyEnabled:        d.kubeProxyEnabled,
 		KubernetesVersion:       d.kubernetesVersion,
 		SSHPublicKeys:           d.sshPublicKeys,
 		SSHAccessEnabled:        d.sshAccessEnabled,

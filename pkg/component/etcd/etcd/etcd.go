@@ -212,7 +212,7 @@ func (e *etcd) Deploy(ctx context.Context) error {
 		metrics             = druidv1alpha1.Basic
 		volumeClaimTemplate = e.etcd.Name
 		minAllowed          = corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("200M"),
+			corev1.ResourceMemory: resource.MustParse("60M"),
 		}
 	)
 
@@ -220,10 +220,16 @@ func (e *etcd) Deploy(ctx context.Context) error {
 		if !e.values.HighAvailabilityEnabled {
 			annotations = map[string]string{"cluster-autoscaler.kubernetes.io/safe-to-evict": "false"}
 		}
+		resourcesBackupRestore = &corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("20m"),
+				corev1.ResourceMemory: resource.MustParse("80Mi"),
+			},
+		}
 		metrics = druidv1alpha1.Extensive
 		volumeClaimTemplate = e.values.Role + "-" + strings.TrimSuffix(e.etcd.Name, "-"+e.values.Role)
 		minAllowed = corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("700M"),
+			corev1.ResourceMemory: resource.MustParse("300M"),
 		}
 	}
 
@@ -691,12 +697,6 @@ func (e *etcd) Deploy(ctx context.Context) error {
 
 	// etcd deployed for shoot cluster
 	if e.values.NamePrefix == "" {
-		// TODO(rickardsjp, chrkl, istvanballok): Remove after v1.102
-		err := kubernetesutils.DeleteObject(ctx, e.client, e.emptyScrapeConfig())
-		if client.IgnoreNotFound(err) != nil {
-			return fmt.Errorf("could not delete etcd scrape config in namespace %v: %w", e.namespace, err)
-		}
-
 		// TODO: The PrometheusRules for the garden cluster case are maintained in a separate file located here:
 		//  pkg/component/observability/monitoring/prometheus/garden/assets/prometheusrules/etcd.yaml
 		//  These rules highly overlap with those for the shoots maintained here. They should be merged in the future.
@@ -753,22 +753,6 @@ func (e *etcd) Deploy(ctx context.Context) error {
 							Annotations: map[string]string{
 								"summary":     "Etcd3 " + e.values.Role + " has no leader.",
 								"description": "Etcd3 cluster " + e.values.Role + " has no leader. Possible network partition in the etcd cluster.",
-							},
-						},
-						// etcd proposal alerts
-						// alert if there are several failed proposals within an hour
-						{
-							Alert: "KubeEtcd3" + role + "HighNumberOfFailedProposals",
-							Expr:  intstr.FromString(`increase(etcd_server_proposals_failed_total{job="` + serviceMonitorJobNameEtcd + `"}[1h]) > 5`),
-							Labels: map[string]string{
-								"service":    "etcd",
-								"severity":   "warning",
-								"type":       "seed",
-								"visibility": "operator",
-							},
-							Annotations: map[string]string{
-								"summary":     "High number of failed etcd proposals",
-								"description": "Etcd3 " + e.values.Role + " pod {{ $labels.pod }} has seen {{ $value }} proposal failures within the last hour.",
 							},
 						},
 						{
@@ -1158,8 +1142,8 @@ func (e *etcd) computeContainerResources(existingSts *appsv1.StatefulSet) (*core
 		}
 		resourcesBackupRestore = &corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("23m"),
-				corev1.ResourceMemory: resource.MustParse("128Mi"),
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("40Mi"),
 			},
 		}
 	)

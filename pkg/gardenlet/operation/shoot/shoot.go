@@ -29,6 +29,7 @@ import (
 	vpnseedserver "github.com/gardener/gardener/pkg/component/networking/vpn/seedserver"
 	sharedcomponent "github.com/gardener/gardener/pkg/component/shared"
 	gardenerextensions "github.com/gardener/gardener/pkg/extensions"
+	"github.com/gardener/gardener/pkg/features"
 	"github.com/gardener/gardener/pkg/gardenlet/apis/config"
 	gardenlethelper "github.com/gardener/gardener/pkg/gardenlet/apis/config/helper"
 	"github.com/gardener/gardener/pkg/utils"
@@ -280,6 +281,14 @@ func (b *Builder) Build(ctx context.Context, c client.Reader) (*Shoot, error) {
 	}
 	shoot.VPNHighAvailabilityNumberOfSeedServers = vpnseedserver.HighAvailabilityReplicaCount
 	shoot.VPNHighAvailabilityNumberOfShootClients = vpnseedserver.HighAvailabilityReplicaCount
+	if vpnVPAUpdateDisabled, err := strconv.ParseBool(shoot.GetInfo().GetAnnotations()[v1beta1constants.ShootAlphaControlPlaneVPNVPAUpdateDisabled]); err == nil {
+		shoot.VPNVPAUpdateDisabled = vpnVPAUpdateDisabled
+	}
+
+	shoot.UsesNewVPN = features.DefaultFeatureGate.Enabled(features.NewVPN)
+	if disableNewVPN, err := strconv.ParseBool(shoot.GetInfo().GetAnnotations()[v1beta1constants.ShootAlphaControlPlaneDisableNewVPN]); err == nil {
+		shoot.UsesNewVPN = !disableNewVPN
+	}
 
 	needsClusterAutoscaler, err := v1beta1helper.ShootWantsClusterAutoscaler(shootObject)
 	if err != nil {
@@ -548,19 +557,19 @@ func ToNetworks(shoot *gardencorev1beta1.Shoot, workerless bool) (*Networks, err
 			return nil, fmt.Errorf("cannot parse shoot's pod cidr %w", err)
 		}
 		pods = append(pods, *p)
-	} else if !workerless {
+	} else if !workerless && !gardencorev1beta1.IsIPv6SingleStack(shoot.Spec.Networking.IPFamilies) {
 		return nil, fmt.Errorf("shoot's pods cidr is empty")
 	}
 
-	if shoot.Spec.Networking.Services == nil {
+	if shoot.Spec.Networking.Services != nil {
+		_, s, err := net.ParseCIDR(*shoot.Spec.Networking.Services)
+		if err != nil {
+			return nil, fmt.Errorf("cannot parse shoot's network cidr %w", err)
+		}
+		services = append(services, *s)
+	} else if !gardencorev1beta1.IsIPv6SingleStack(shoot.Spec.Networking.IPFamilies) {
 		return nil, fmt.Errorf("shoot's service cidr is empty")
 	}
-
-	_, s, err := net.ParseCIDR(*shoot.Spec.Networking.Services)
-	if err != nil {
-		return nil, fmt.Errorf("cannot parse shoot's network cidr %w", err)
-	}
-	services = append(services, *s)
 
 	if shoot.Spec.Networking.Nodes != nil {
 		_, n, err := net.ParseCIDR(*shoot.Spec.Networking.Nodes)
@@ -568,7 +577,7 @@ func ToNetworks(shoot *gardencorev1beta1.Shoot, workerless bool) (*Networks, err
 			return nil, fmt.Errorf("cannot parse shoot's node cidr %w", err)
 		}
 		nodes = append(nodes, *n)
-	} else if !workerless {
+	} else if !workerless && !gardencorev1beta1.IsIPv6SingleStack(shoot.Spec.Networking.IPFamilies) {
 		return nil, fmt.Errorf("shoot's node cidr is empty")
 	}
 

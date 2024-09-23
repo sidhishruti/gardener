@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"reflect"
 	"slices"
 	"strconv"
@@ -315,6 +316,12 @@ func (v *ValidateShoot) Admit(ctx context.Context, a admission.Attributes, _ adm
 	if err := validationContext.validateShootHibernation(a); err != nil {
 		return err
 	}
+	if err := validationContext.validateSecretBindingToCredentialsBindingMigration(a, v.secretBindingLister, v.credentialsBindingLister); err != nil {
+		return err
+	}
+	if err := validationContext.validateCredentialsBindingChange(ctx, a, v.authorizer, v.credentialsBindingLister); err != nil {
+		return err
+	}
 	if allErrs = validationContext.ensureMachineImages(); len(allErrs) > 0 {
 		return admission.NewForbidden(a, fmt.Errorf("%+v", allErrs))
 	}
@@ -566,7 +573,7 @@ func authorize(ctx context.Context, a admission.Attributes, auth authorizer.Auth
 	})
 
 	if err != nil {
-		return err
+		return apierrors.NewInternalError(fmt.Errorf("could not authorize update request for shoot binding subresource: %+v", err.Error()))
 	}
 
 	if decision != authorizer.DecisionAllow {
@@ -621,6 +628,113 @@ func (c *validationContext) validateShootHibernation(a admission.Attributes) err
 		addDNSRecordDeploymentTasks(c.shoot)
 	}
 
+	return nil
+}
+
+func (c *validationContext) validateSecretBindingToCredentialsBindingMigration(
+	a admission.Attributes,
+	secretBindingLister gardencorev1beta1listers.SecretBindingLister,
+	credentialsBindingLister securityv1alpha1listers.CredentialsBindingLister,
+) error {
+	secretBindingNameProgressedToEmpty := c.oldShoot.Spec.SecretBindingName != nil && c.shoot.Spec.SecretBindingName == nil
+	credentialsBindingNameProgressedToSet := c.oldShoot.Spec.CredentialsBindingName == nil && c.shoot.Spec.CredentialsBindingName != nil
+
+	if secretBindingNameProgressedToEmpty && credentialsBindingNameProgressedToSet {
+		secretBinding, err := secretBindingLister.SecretBindings(c.oldShoot.Namespace).Get(*c.oldShoot.Spec.SecretBindingName)
+		if err != nil {
+			return apierrors.NewInternalError(fmt.Errorf("could not retrieve previously referenced secret binding: %+v", err.Error()))
+		}
+		credentialsBinding, err := credentialsBindingLister.CredentialsBindings(c.shoot.Namespace).Get(*c.shoot.Spec.CredentialsBindingName)
+		if err != nil {
+			return apierrors.NewInternalError(fmt.Errorf("could not retrieve newly referenced credentials binding: %+v", err.Error()))
+		}
+
+		// during migration the newly referenced credential should be
+		// the exact same one that was referenced by the secret binding
+		if credentialsBinding.CredentialsRef.Kind != "Secret" ||
+			credentialsBinding.CredentialsRef.APIVersion != corev1.SchemeGroupVersion.String() ||
+			credentialsBinding.CredentialsRef.Name != secretBinding.SecretRef.Name ||
+			credentialsBinding.CredentialsRef.Namespace != secretBinding.SecretRef.Namespace {
+			return admission.NewForbidden(a, errors.New("it is not allowed to change the referenced Secret when migrating from SecretBindingName to CredentialsBindingName"))
+		}
+	}
+
+	return nil
+}
+
+func (c *validationContext) validateCredentialsBindingChange(
+	ctx context.Context,
+	a admission.Attributes,
+	auth authorizer.Authorizer,
+	credentialsBindingLister securityv1alpha1listers.CredentialsBindingLister,
+) error {
+	getAttributesRecord := func(credentialsBinding *securityv1alpha1.CredentialsBinding) (authorizer.AttributesRecord, error) {
+		var (
+			credentialsAPIGroup   string
+			credentialsAPIVersion string
+			credentialsResource   string
+		)
+		if credentialsBinding.CredentialsRef.APIVersion == corev1.SchemeGroupVersion.String() {
+			credentialsAPIGroup = corev1.SchemeGroupVersion.Group
+			credentialsAPIVersion = corev1.SchemeGroupVersion.Version
+			credentialsResource = "secrets"
+		} else if credentialsBinding.CredentialsRef.APIVersion == securityv1alpha1.SchemeGroupVersion.String() {
+			credentialsAPIGroup = securityv1alpha1.SchemeGroupVersion.Group
+			credentialsAPIVersion = securityv1alpha1.SchemeGroupVersion.Version
+			credentialsResource = "workloadidentities"
+		} else {
+			return authorizer.AttributesRecord{}, errors.New("unknown credentials ref: CredentialsBinding is referencing neither a Secret nor a WorkloadIdentity")
+		}
+		return authorizer.AttributesRecord{
+			User:            a.GetUserInfo(),
+			Verb:            "get",
+			APIGroup:        credentialsAPIGroup,
+			APIVersion:      credentialsAPIVersion,
+			Resource:        credentialsResource,
+			Namespace:       credentialsBinding.CredentialsRef.Namespace,
+			Name:            credentialsBinding.CredentialsRef.Name,
+			ResourceRequest: true,
+		}, nil
+	}
+
+	// Prevent users from changing the credentials binding unless they have read permissions for both old and new credentials.
+	// This ensures that if a user has access to a shoot that references a binding in another namespace controlled by another party
+	// the said user cannot reference another binding and potentially change the underlying cloud provider account
+	// and leave orphaned resources in the other party's account.
+	if c.oldShoot.Spec.CredentialsBindingName != nil && c.shoot.Spec.CredentialsBindingName != nil &&
+		*c.oldShoot.Spec.CredentialsBindingName != *c.shoot.Spec.CredentialsBindingName {
+		oldCredentialsBinding, err := credentialsBindingLister.CredentialsBindings(c.oldShoot.Namespace).Get(*c.oldShoot.Spec.CredentialsBindingName)
+		if err != nil {
+			return apierrors.NewInternalError(fmt.Errorf("could not retrieve previously referenced credentials binding: %+v", err.Error()))
+		}
+
+		oldCredentialsBindingAttributesRecord, err := getAttributesRecord(oldCredentialsBinding)
+		if err != nil {
+			return admission.NewForbidden(a, err)
+		}
+
+		if decision, _, err := auth.Authorize(ctx, oldCredentialsBindingAttributesRecord); err != nil {
+			return apierrors.NewInternalError(fmt.Errorf("could not authorize read request for old credentials: %+v", err.Error()))
+		} else if decision != authorizer.DecisionAllow {
+			return admission.NewForbidden(a, fmt.Errorf("user %q is not allowed to read the previously referenced %s %q", a.GetUserInfo().GetName(), oldCredentialsBinding.CredentialsRef.Kind, oldCredentialsBinding.CredentialsRef.Namespace+"/"+oldCredentialsBinding.CredentialsRef.Name))
+		}
+
+		newCredentialsBinding, err := credentialsBindingLister.CredentialsBindings(c.shoot.Namespace).Get(*c.shoot.Spec.CredentialsBindingName)
+		if err != nil {
+			return apierrors.NewInternalError(fmt.Errorf("could not retrieve newly referenced credentials binding: %+v", err.Error()))
+		}
+
+		newCredentialsBindingAttributesRecord, err := getAttributesRecord(newCredentialsBinding)
+		if err != nil {
+			return admission.NewForbidden(a, err)
+		}
+
+		if decision, _, err := auth.Authorize(ctx, newCredentialsBindingAttributesRecord); err != nil {
+			return apierrors.NewInternalError(fmt.Errorf("could not authorize read request for new credentials: %+v", err.Error()))
+		} else if decision != authorizer.DecisionAllow {
+			return admission.NewForbidden(a, fmt.Errorf("user %q is not allowed to read the newly referenced %s %q", a.GetUserInfo().GetName(), newCredentialsBinding.CredentialsRef.Kind, newCredentialsBinding.CredentialsRef.Namespace+"/"+newCredentialsBinding.CredentialsRef.Name))
+		}
+	}
 	return nil
 }
 
@@ -714,6 +828,39 @@ func (c *validationContext) validateAdmissionPlugins(a admission.Attributes, sec
 	return allErrs
 }
 
+// For backwards-compatibility, we want to validate the oidc config only for newly created Shoot clusters.
+// Performing the validation for all Shoots would prevent already existing Shoots with the wrong spec to be updated/deleted.
+// There is additional oidc config validation in the static API validation.
+func (c *validationContext) validateKubeAPIServerOIDCConfig(a admission.Attributes) field.ErrorList {
+	var (
+		allErrs field.ErrorList
+		path    = field.NewPath("spec", "kubernetes", "kubeAPIServer", "oidcConfig")
+	)
+
+	if a.GetOperation() != admission.Create {
+		return nil
+	}
+
+	if c.shoot.Spec.Kubernetes.KubeAPIServer == nil || c.shoot.Spec.Kubernetes.KubeAPIServer.OIDCConfig == nil {
+		return nil
+	}
+
+	oidc := c.shoot.Spec.Kubernetes.KubeAPIServer.OIDCConfig
+	if oidc.ClientID == nil {
+		allErrs = append(allErrs, field.Required(path.Child("clientID"), "clientID must be set when oidcConfig is provided"))
+	} else if len(*oidc.ClientID) == 0 {
+		allErrs = append(allErrs, field.Required(path.Child("clientID"), "clientID cannot be empty"))
+	}
+
+	if oidc.IssuerURL == nil {
+		allErrs = append(allErrs, field.Required(path.Child("issuerURL"), "issuerURL must be set when oidcConfig is provided"))
+	} else if len(*oidc.IssuerURL) == 0 {
+		allErrs = append(allErrs, field.Required(path.Child("issuerURL"), "issuerURL cannot be empty"))
+	}
+
+	return allErrs
+}
+
 func (c *validationContext) validateReferencedSecret(secretLister kubecorev1listers.SecretLister, secretName, namespace string, fldPath *field.Path) *field.Error {
 	var (
 		secret *corev1.Secret
@@ -731,6 +878,11 @@ func (c *validationContext) validateReferencedSecret(secretLister kubecorev1list
 	return nil
 }
 
+func cidrMatchesIPFamily(cidr string, ipfamilies []core.IPFamily) bool {
+	ip, _, _ := net.ParseCIDR(cidr)
+	return ip != nil && (ip.To4() != nil && slices.Contains(ipfamilies, core.IPFamilyIPv4) || ip.To4() == nil && slices.Contains(ipfamilies, core.IPFamilyIPv6))
+}
+
 func (c *validationContext) validateShootNetworks(a admission.Attributes, workerless bool) field.ErrorList {
 	var (
 		allErrs field.ErrorList
@@ -744,53 +896,59 @@ func (c *validationContext) validateShootNetworks(a admission.Attributes, worker
 	if c.seed != nil {
 		if c.shoot.Spec.Networking.Pods == nil && !workerless {
 			if c.seed.Spec.Networks.ShootDefaults != nil {
-				c.shoot.Spec.Networking.Pods = c.seed.Spec.Networks.ShootDefaults.Pods
-			} else {
+				if cidrMatchesIPFamily(*c.seed.Spec.Networks.ShootDefaults.Pods, c.shoot.Spec.Networking.IPFamilies) {
+					c.shoot.Spec.Networking.Pods = c.seed.Spec.Networks.ShootDefaults.Pods
+				}
+			} else if slices.Contains(c.shoot.Spec.Networking.IPFamilies, core.IPFamilyIPv4) {
 				allErrs = append(allErrs, field.Required(path.Child("pods"), "pods is required"))
 			}
 		}
 
 		if c.shoot.Spec.Networking.Services == nil {
 			if c.seed.Spec.Networks.ShootDefaults != nil {
-				c.shoot.Spec.Networking.Services = c.seed.Spec.Networks.ShootDefaults.Services
-			} else {
+				if cidrMatchesIPFamily(*c.seed.Spec.Networks.ShootDefaults.Services, c.shoot.Spec.Networking.IPFamilies) {
+					c.shoot.Spec.Networking.Services = c.seed.Spec.Networks.ShootDefaults.Services
+				}
+			} else if slices.Contains(c.shoot.Spec.Networking.IPFamilies, core.IPFamilyIPv4) {
 				allErrs = append(allErrs, field.Required(path.Child("services"), "services is required"))
 			}
 		}
 
-		// validate network disjointedness within shoot network
-		allErrs = append(allErrs, cidrvalidation.ValidateShootNetworkDisjointedness(
-			path,
-			c.shoot.Spec.Networking.Nodes,
-			c.shoot.Spec.Networking.Pods,
-			c.shoot.Spec.Networking.Services,
-			workerless,
-		)...)
-
-		// validate network disjointedness with seed networks if shoot is being (re)scheduled
-		if !apiequality.Semantic.DeepEqual(c.oldShoot.Spec.SeedName, c.shoot.Spec.SeedName) {
-			allErrs = append(allErrs, cidrvalidation.ValidateNetworkDisjointedness(
+		if slices.Contains(c.shoot.Spec.Networking.IPFamilies, core.IPFamilyIPv4) {
+			// validate network disjointedness within shoot network
+			allErrs = append(allErrs, cidrvalidation.ValidateShootNetworkDisjointedness(
 				path,
 				c.shoot.Spec.Networking.Nodes,
 				c.shoot.Spec.Networking.Pods,
 				c.shoot.Spec.Networking.Services,
-				c.seed.Spec.Networks.Nodes,
-				c.seed.Spec.Networks.Pods,
-				c.seed.Spec.Networks.Services,
 				workerless,
 			)...)
 
-			if c.shoot.Status.Networking != nil {
-				allErrs = append(allErrs, cidrvalidation.ValidateMultiNetworkDisjointedness(
-					field.NewPath("status", "networking"),
-					c.shoot.Status.Networking.Nodes,
-					c.shoot.Status.Networking.Pods,
-					c.shoot.Status.Networking.Services,
+			// validate network disjointedness with seed networks if shoot is being (re)scheduled
+			if !apiequality.Semantic.DeepEqual(c.oldShoot.Spec.SeedName, c.shoot.Spec.SeedName) {
+				allErrs = append(allErrs, cidrvalidation.ValidateNetworkDisjointedness(
+					path,
+					c.shoot.Spec.Networking.Nodes,
+					c.shoot.Spec.Networking.Pods,
+					c.shoot.Spec.Networking.Services,
 					c.seed.Spec.Networks.Nodes,
 					c.seed.Spec.Networks.Pods,
 					c.seed.Spec.Networks.Services,
 					workerless,
 				)...)
+
+				if c.shoot.Status.Networking != nil {
+					allErrs = append(allErrs, cidrvalidation.ValidateMultiNetworkDisjointedness(
+						field.NewPath("status", "networking"),
+						c.shoot.Status.Networking.Nodes,
+						c.shoot.Status.Networking.Pods,
+						c.shoot.Status.Networking.Services,
+						c.seed.Spec.Networks.Nodes,
+						c.seed.Spec.Networks.Pods,
+						c.seed.Spec.Networks.Services,
+						workerless,
+					)...)
+				}
 			}
 		}
 	}
@@ -819,6 +977,8 @@ func (c *validationContext) validateKubernetes(a admission.Attributes) field.Err
 		// We assume that the 'defaultVersion' is already calculated correctly, so only run validation if the version was not defaulted.
 		allErrs = append(allErrs, validateKubernetesVersionConstraints(a, c.cloudProfileSpec.Kubernetes.Versions, c.shoot.Spec.Kubernetes.Version, c.oldShoot.Spec.Kubernetes.Version, false, path.Child("version"))...)
 	}
+
+	allErrs = append(allErrs, c.validateKubeAPIServerOIDCConfig(a)...)
 
 	if c.shoot.DeletionTimestamp == nil {
 		performKubernetesDefaulting(c.shoot, c.oldShoot)
